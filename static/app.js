@@ -316,13 +316,14 @@ function openGallery() { $("gallery").hidden = false; }
 function closeGallery() { $("gallery").hidden = true; }
 
 async function startBestShots() {
+  clearInterval(_boltPoll); _boltPoll = null;
   openGallery();
+  $("gallery-title").textContent = "⚡ Best Shots";
   $("gallery-grid").innerHTML =
     '<div class="gal-msg">Finding best shots… checking each flash for a real channel.</div>';
   try {
     const r = await (await fetch("/api/refine-bolts", { method: "POST" })).json();
     if (r.status === "done") { onBolts(r); return; }
-    clearInterval(_boltPoll);
     _boltPoll = setInterval(pollBolts, 1200);
   } catch (e) {
     $("gallery-grid").innerHTML = `<div class="gal-msg">Error: ${e.message}</div>`;

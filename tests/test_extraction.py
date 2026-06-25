@@ -1,0 +1,55 @@
+import io
+
+import numpy as np
+from PIL import Image
+
+from video import VideoFile
+
+
+def _mean(rgb):
+    return float(rgb.mean())
+
+
+def test_meta(clip):
+    v = VideoFile(clip.path)
+    m = v.meta
+    assert m.width == 320 and m.height == 180
+    assert abs(m.fps - clip.fps) < 0.5
+    assert abs(m.frame_count - clip.n_frames) <= 1
+
+
+def test_frame_native_resolution(clip):
+    v = VideoFile(clip.path)
+    f = v.frame(50)
+    assert f.shape == (180, 320, 3)
+    assert f.dtype == np.uint8
+
+
+def test_dark_and_bright_frames(clip):
+    v = VideoFile(clip.path)
+    assert _mean(v.frame(0)) < 40
+    assert _mean(v.frame(50)) > 150
+
+
+def test_frame_accuracy_neighbors(clip):
+    v = VideoFile(clip.path)
+    # frame 122 is the flicker peak (250); 119 is dark pre-flicker (8)
+    assert _mean(v.frame(122)) > _mean(v.frame(119)) + 50
+    # peak 122 (250) brighter than 123 (190)
+    assert _mean(v.frame(122)) > _mean(v.frame(123))
+
+
+def test_frame_png_bytes(clip):
+    v = VideoFile(clip.path)
+    data = v.frame_png_bytes(50)
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    im = Image.open(io.BytesIO(data))
+    assert im.size == (320, 180)
+
+
+def test_thumb_jpeg_bytes(clip):
+    v = VideoFile(clip.path)
+    data = v.thumb_jpeg_bytes(50, height=120)
+    assert data[:3] == b"\xff\xd8\xff"          # JPEG magic
+    im = Image.open(io.BytesIO(data))
+    assert im.height == 120

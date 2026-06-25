@@ -1,2 +1,50 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Lightning Finder</title></head>
-<body>Lightning Finder</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lightning Finder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚡ Lightning Finder</h1>
+    <span id="res-label" class="muted"></span>
+    <span id="mode-label" class="badge">playback</span>
+  </header>
+
+  <main>
+    <section id="viewer">
+      <div id="stage">
+        <video id="video" preload="metadata"></video>
+        <img id="frame-img" alt="exact frame" hidden>
+      </div>
+      <div id="timeline" title="click to seek"></div>
+      <div id="controls">
+        <button id="btn-prev-flash" title="Prev flash (Shift+←)">⏮ flash</button>
+        <button id="btn-frame-back" title="Frame back (←)">◀ frame</button>
+        <button id="btn-play" title="Play/Pause (Space)">▶ / ⏸</button>
+        <button id="btn-frame-fwd" title="Frame fwd (→)">frame ▶</button>
+        <button id="btn-next-flash" title="Next flash (Shift+→)">flash ⏭</button>
+        <span id="time-label" class="muted">frame 0 · 00:00:00.000</span>
+        <span class="spacer"></span>
+        <label>sensitivity
+          <input id="sensitivity" type="range" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <button id="btn-rescan">Rescan</button>
+        <button id="btn-grab" class="primary" title="Grab full-quality (G)">⬇ Grab</button>
+        <button id="btn-export-csv">CSV</button>
+        <button id="btn-export-json">JSON</button>
+      </div>
+    </section>
+
+    <aside id="sidebar">
+      <h2>Flashes</h2>
+      <ol id="flash-list"></ol>
+    </aside>
+  </main>
+
+  <div id="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

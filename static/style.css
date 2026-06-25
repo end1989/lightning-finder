@@ -1,0 +1,40 @@
+:root { --bg:#0c0f16; --panel:#161b26; --line:#2a3346; --text:#e6ebf5;
+        --muted:#8a93a6; --accent:#ffd23f; --mark:#ffd23f; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text);
+       font:14px/1.4 system-ui, sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:10px 16px;
+         border-bottom:1px solid var(--line); }
+header h1 { font-size:16px; margin:0; }
+.muted { color:var(--muted); }
+.badge { margin-left:auto; padding:2px 10px; border:1px solid var(--line);
+         border-radius:999px; color:var(--accent); font-size:12px; }
+main { display:grid; grid-template-columns:1fr 280px; gap:12px; padding:12px; }
+#stage { position:relative; background:#000; border:1px solid var(--line);
+         border-radius:8px; display:flex; align-items:center; justify-content:center;
+         min-height:50vh; overflow:hidden; }
+#video, #frame-img { max-width:100%; max-height:70vh; display:block; }
+#timeline { position:relative; height:34px; margin:10px 0; background:var(--panel);
+            border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+#timeline .marker { position:absolute; top:0; width:2px; height:100%;
+                    background:var(--mark); }
+#timeline .playhead { position:absolute; top:-3px; width:2px; height:40px;
+                      background:#fff; }
+#controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+         border-radius:6px; padding:6px 10px; cursor:pointer; }
+button:hover { border-color:var(--accent); }
+button.primary { background:var(--accent); color:#000; font-weight:600; }
+.spacer { flex:1; }
+#sidebar { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+           padding:10px; max-height:84vh; overflow:auto; }
+#sidebar h2 { font-size:13px; text-transform:uppercase; color:var(--muted); }
+#flash-list { list-style:none; margin:0; padding:0; }
+#flash-list li { padding:6px 8px; border-radius:6px; cursor:pointer;
+                 display:flex; justify-content:space-between; gap:6px; }
+#flash-list li:hover { background:#1f2636; }
+#flash-list li.active { background:#2a3346; }
+#flash-list li.rejected { opacity:.45; text-decoration:line-through; }
+#toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
+         background:#000; border:1px solid var(--accent); color:var(--text);
+         padding:8px 14px; border-radius:8px; }

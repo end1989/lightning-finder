@@ -83,7 +83,14 @@ function entryRow(icon, label, onClick, isVideo) {
 }
 
 async function browseTo(path) {
-  const r = await (await fetch(`/api/browse?path=${encodeURIComponent(path)}`)).json();
+  let r;
+  try {
+    r = await (await fetch(`/api/browse?path=${encodeURIComponent(path)}`)).json();
+  } catch (e) {
+    $("open-list").innerHTML = '';
+    $("open-list").appendChild(entryRow("", "Couldn't read that folder.", () => {}, false));
+    return;
+  }
   $("open-path").textContent = r.path || "This PC";
   const list = $("open-list");
   list.innerHTML = "";
@@ -96,13 +103,17 @@ async function browseTo(path) {
 
 async function openVideo(path) {
   $("open-path").textContent = "Opening…";
-  const r = await fetch("/api/open", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
-  });
-  if (!r.ok) { toast("Couldn't open that file"); return; }
-  hideOpenScreen();
-  await initVideo();
+  try {
+    const r = await fetch("/api/open", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) { toast("Couldn't open that file"); $("open-path").textContent = ""; return; }
+    await initVideo();
+    hideOpenScreen();
+  } catch (e) {
+    toast(`Open error: ${e.message}`);
+  }
 }
 
 function wireOpen() { $("btn-open").addEventListener("click", showOpenScreen); }
@@ -119,9 +130,14 @@ async function main() {
   if (typeof wireKeyboard === "function") wireKeyboard();
   if (typeof wirePrecision === "function") wirePrecision();
   if (typeof wireExport === "function") wireExport();
-  const st = await (await fetch("/api/state")).json();
-  if (st.loaded) await initVideo();
-  else showOpenScreen();
+  try {
+    const st = await (await fetch("/api/state")).json();
+    if (st.loaded) await initVideo();
+    else showOpenScreen();
+  } catch (e) {
+    toast("Server unavailable");
+    showOpenScreen();
+  }
 }
 main();
 

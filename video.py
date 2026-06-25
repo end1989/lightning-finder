@@ -181,6 +181,33 @@ class VideoFile:
                 return best.to_ndarray(format="rgb24")
         raise IndexError(f"frame {index} not found")
 
+    def iter_range(self, start, end, downscale_height=None):
+        """Yield (index, rgb) for index in [start, end], decoded sequentially.
+
+        One seek + forward decode per call — far cheaper than calling frame()
+        per index when scanning a contiguous window (e.g. a flash's frames).
+        """
+        fps = self.meta.fps or 30.0
+        with av.open(self.path) as c:
+            s = c.streams.video[0]
+            tb = s.time_base
+            seek_pts = int((start / fps) / tb) if tb else 0
+            c.seek(seek_pts, stream=s, any_frame=False, backward=True)
+            for frame in c.decode(s):
+                ft = float(frame.pts * tb) if (frame.pts is not None and tb) else 0.0
+                idx = int(round(ft * fps))
+                if idx < start:
+                    continue
+                if idx > end:
+                    break
+                if downscale_height and frame.height > downscale_height:
+                    w = max(1, int(frame.width * downscale_height / frame.height))
+                    img = frame.reformat(width=w, height=downscale_height,
+                                         format="rgb24").to_ndarray()
+                else:
+                    img = frame.to_ndarray(format="rgb24")
+                yield idx, img
+
     def frame_png_bytes(self, index) -> bytes:
         """Lossless native-resolution PNG — used for the full-quality grab."""
         buf = io.BytesIO()

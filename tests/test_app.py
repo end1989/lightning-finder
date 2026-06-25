@@ -93,3 +93,22 @@ def test_rescan_endpoint_changes_with_sensitivity(clip):
     r = c.post("/api/scan", json={"sensitivity": 0.5})
     assert r.status_code == 200
     assert "events" in r.json()
+
+
+def test_refine_bolts_endpoint(clip):
+    """Best-shots refine runs in the background and returns ranked events."""
+    import time
+    c = client(clip)
+    started = c.post("/api/refine-bolts").json()
+    assert started["status"] in ("running", "done")
+    r = started
+    for _ in range(100):
+        r = c.get("/api/refine-bolts").json()
+        if r["status"] == "done":
+            break
+        time.sleep(0.2)
+    assert r["status"] == "done"
+    assert len(r["events"]) >= 3
+    assert all("is_bolt" in e and "bolt_frame" in e for e in r["events"])
+    scores = [e["bolt_score"] for e in r["events"]]
+    assert scores == sorted(scores, reverse=True)        # ranked by bolt strength

@@ -81,48 +81,51 @@ class VideoFile:
             if self._meta is not None and idx and idx != self._meta.frame_count:
                 self._meta.frame_count = idx
 
-    def _ensure_index(self):
-        """Build the per-index PTS table if not already built (lazy, one pass, thread-safe)."""
-        if self._indexed:
-            return
-        with self._index_lock:
-            if self._indexed:
-                return
-            pts: list[int | None] = []
-            with av.open(self.path) as c:
-                s = c.streams.video[0]
-                for frame in c.decode(s):
-                    pts.append(int(frame.pts) if frame.pts is not None else None)
-            self._pts = pts
-            self._indexed = True
-            if self._meta is not None and pts and len(pts) != self._meta.frame_count:
-                self._meta.frame_count = len(pts)
-
     def frame(self, index) -> np.ndarray:
         """Return the exact frame at `index` as native-res RGB uint8 ndarray.
 
-        Uses the PTS index (built lazily or by a prior iter_frames pass) so the
-        result is frame-accurate including on variable-frame-rate footage.
+        Fast by design. If a full PTS index already exists (built by a prior
+        scan via iter_frames), seek by the recorded PTS for exactness even on
+        variable-frame-rate footage. Otherwise seek by estimated time
+        (index/fps) and decode forward to the target frame: frame-accurate for
+        constant-frame-rate video without a full decode pass. We never build the
+        whole index here — doing so would stall the first precision-mode frame
+        for minutes on a long 4K video whose events were loaded from cache.
         """
-        self._ensure_index()
-        n = len(self._pts)
-        if not (0 <= index < n):
-            raise IndexError(f"frame {index} out of range (0..{n - 1})")
-        target = self._pts[index]
+        fc = self.meta.frame_count
+        if fc and not (0 <= index < fc):
+            raise IndexError(f"frame {index} out of range (0..{fc - 1})")
+
         with av.open(self.path) as c:
             s = c.streams.video[0]
-            if target is None:
-                # pts metadata missing for this frame: decode from start, counting
-                for i, frame in enumerate(c.decode(s)):
-                    if i == index:
+            tb = s.time_base
+
+            # Exact path: the per-index PTS is already known (a scan ran).
+            if (self._indexed and 0 <= index < len(self._pts)
+                    and self._pts[index] is not None):
+                target = self._pts[index]
+                c.seek(target, stream=s, any_frame=False, backward=True)
+                for frame in c.decode(s):
+                    if frame.pts is None:
+                        continue
+                    if frame.pts >= target:
                         return frame.to_ndarray(format="rgb24")
                 raise IndexError(f"frame {index} not found")
-            c.seek(target, stream=s, any_frame=False, backward=True)
+
+            # Time-based path: seek near index/fps and decode forward. No full
+            # index build, so the first frame request is fast even on long 4K.
+            fps = self.meta.fps or 30.0
+            target_t = index / fps
+            seek_pts = int(target_t / tb) if tb else 0
+            c.seek(seek_pts, stream=s, any_frame=False, backward=True)
+            best = None
             for frame in c.decode(s):
-                if frame.pts is None:
-                    continue
-                if frame.pts >= target:
+                best = frame
+                ft = float(frame.pts * tb) if (frame.pts is not None and tb) else 0.0
+                if ft >= target_t - 1e-6:
                     return frame.to_ndarray(format="rgb24")
+            if best is not None:
+                return best.to_ndarray(format="rgb24")
         raise IndexError(f"frame {index} not found")
 
     def frame_png_bytes(self, index) -> bytes:

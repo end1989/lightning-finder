@@ -53,3 +53,27 @@ def test_thumb_jpeg_bytes(clip):
     assert data[:3] == b"\xff\xd8\xff"          # JPEG magic
     im = Image.open(io.BytesIO(data))
     assert im.height == 120
+
+
+def test_frame_does_not_build_full_index(clip):
+    """frame() must NOT force a full-video PTS index build.
+
+    When events load from cache, iter_frames never runs, so _indexed stays
+    False. If frame() forced a full decode pass to build the index, the first
+    precision-mode frame would stall for minutes on a long 4K video. frame()
+    must instead seek by time without building the whole index.
+    """
+    v = VideoFile(clip.path)
+    assert v._indexed is False
+    f = v.frame(50)
+    assert f.shape == (180, 320, 3)
+    assert _mean(f) > 150                         # still the correct bright frame
+    assert v._indexed is False, "frame() must not force a full PTS index build"
+
+
+def test_frame_uses_prebuilt_index_when_available(clip):
+    """When a scan already built the index, frame() stays frame-accurate."""
+    v = VideoFile(clip.path)
+    list(v.iter_frames())                          # builds the PTS index
+    assert v._indexed is True
+    assert _mean(v.frame(122)) > _mean(v.frame(123))   # peak 122 > 123

@@ -1,3 +1,5 @@
+import numpy as np
+
 from video import VideoFile
 import detector
 
@@ -34,3 +36,15 @@ def test_cache_roundtrip(clip):
     loaded = detector.load_events(clip.path, params)
     assert loaded is not None
     assert [e.peak_frame for e in loaded] == [e.peak_frame for e in events]
+
+
+def test_brightness_cache_roundtrip(clip):
+    """Brightness/times are cached (sensitivity-independent) so rescan is cheap."""
+    v = VideoFile(clip.path)
+    b, t = detector.scan_brightness(v)
+    detector.save_brightness(clip.path, b, t)
+    loaded = detector.load_brightness(clip.path)
+    assert loaded is not None
+    lb, lt = loaded
+    assert np.allclose(lb, b)
+    assert np.allclose(lt, t)

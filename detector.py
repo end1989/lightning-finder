@@ -108,3 +108,33 @@ def load_events(path, params):
 def save_events(path, params, events):
     with open(cache_path(path, params), "w", encoding="utf-8") as f:
         json.dump([asdict(e) for e in events], f)
+
+
+def brightness_cache_path(path):
+    """Sidecar path for the cached brightness/times arrays.
+
+    Keyed by path + size + mtime only (NOT sensitivity): the per-frame
+    brightness is the expensive, sensitivity-independent artifact, so caching it
+    makes both reopening a video and changing sensitivity (rescan) instant.
+    """
+    st = os.stat(path)
+    raw = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
+    key = hashlib.sha1(raw.encode()).hexdigest()
+    folder = os.path.dirname(os.path.abspath(path)) or "."
+    return os.path.join(folder, f".lf_bright_{key}.npz")
+
+
+def load_brightness(path):
+    """Return (brightness, times) from the sidecar cache, or None if absent."""
+    cp = brightness_cache_path(path)
+    if not os.path.exists(cp):
+        return None
+    d = np.load(cp)
+    try:
+        return np.array(d["brightness"]), np.array(d["times"])
+    finally:
+        d.close()
+
+
+def save_brightness(path, brightness, times):
+    np.savez(brightness_cache_path(path), brightness=brightness, times=times)

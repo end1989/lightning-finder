@@ -60,3 +60,36 @@ def test_markers_roundtrip(clip):
     assert c.post("/api/markers", json={"peak_frame": 50, "label": "bolt",
                                         "status": "confirmed"}).status_code == 200
     assert c.get("/api/markers").json()["50"]["label"] == "bolt"
+
+
+def test_rescan_uses_cached_brightness_not_full_scan(clip, monkeypatch):
+    """Rescan must reuse the cached brightness, not re-decode the whole video.
+
+    On a long video whose events came from cache, brightness was never in
+    memory, so the old rescan triggered a full multi-minute scan. Now brightness
+    is cached and restored, so rescan only re-runs the cheap detect step.
+    """
+    import detector
+    from app import AppState
+
+    AppState(clip.path).ensure_events()                 # builds + caches brightness
+    assert detector.load_brightness(clip.path) is not None
+
+    s = AppState(clip.path)                              # fresh: brightness not in memory
+    assert s.brightness is None
+
+    def _boom(*a, **k):
+        raise AssertionError("rescan must not full-scan when brightness is cached")
+
+    monkeypatch.setattr(detector, "scan_brightness", _boom)
+    events = s.rescan(0.2)                               # must load cached brightness
+    assert isinstance(events, list)
+    assert s.brightness is not None
+
+
+def test_rescan_endpoint_changes_with_sensitivity(clip):
+    """The /api/scan endpoint returns events for the requested sensitivity."""
+    c = client(clip)
+    r = c.post("/api/scan", json={"sensitivity": 0.5})
+    assert r.status_code == 200
+    assert "events" in r.json()

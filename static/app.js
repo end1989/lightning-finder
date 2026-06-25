@@ -144,3 +144,60 @@ function jumpToFlash(dir) {
   seekToFrame(target);
   highlightActive(target);
 }
+
+// ---- Task 7: precision mode, frame stepping, full-quality grab ----------
+function setModeLabel() { $("mode-label").textContent = state.mode; }
+
+function enterPrecision(f) {
+  state.mode = "precision";
+  video.pause();
+  video.hidden = true;
+  frameImg.hidden = false;
+  setModeLabel();
+  showFrame(f);
+}
+
+function exitPrecision() {
+  if (state.mode !== "precision") return;
+  state.mode = "playback";
+  frameImg.hidden = true;
+  video.hidden = false;
+  setModeLabel();
+  video.currentTime = state.curFrame / state.fps;
+}
+
+// Real implementation; overrides the Task 5 skeleton fallback because this
+// script runs later in the same file.
+function showFrame(f) {
+  f = Math.max(0, Math.min((state.frameCount || 1) - 1, f));
+  state.curFrame = f;
+  frameImg.src = `/api/frame/${f}.png`;
+  updateTimeLabel(f);
+  setPlayhead(state.duration ? (f / state.fps) / state.duration : 0);
+  highlightActive(f);
+}
+
+function stepFrame(d) {
+  if (state.mode !== "precision") enterPrecision(curFrameFromVideo());
+  else showFrame(state.curFrame + d);
+}
+
+function stepTime(dt) {
+  const f = Math.round((state.curFrame / state.fps + dt) * state.fps);
+  if (state.mode !== "precision") enterPrecision(f); else showFrame(f);
+}
+
+async function grab() {
+  const r = await fetch("/api/grab", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ index: state.curFrame }),
+  });
+  const data = await r.json();
+  toast(`Saved ${data.path}`);
+}
+
+function wirePrecision() {
+  $("btn-frame-back").addEventListener("click", () => stepFrame(-1));
+  $("btn-frame-fwd").addEventListener("click", () => stepFrame(1));
+  $("btn-grab").addEventListener("click", grab);
+}

@@ -4,3 +4,12 @@ __pycache__/
 output/
 test_clip.mp4
 .pytest_cache/
+
+# SDD scratch (ledger, briefs, reports, diffs) and local artifacts
+.superpowers/
+.playwright-mcp/
+# source videos (large) and grabbed screenshots — never commit footage
+*.mov
+*.MOV
+*.mp4
+precision-frame*.png

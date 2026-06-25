@@ -139,20 +139,26 @@ class AppState:
             self._bolt_thread.start()
 
     def _run_bolt_refine(self):
+        # Snapshot everything tied to the current video. If the user opens a
+        # different video mid-refine, this thread keeps decoding (and caching to)
+        # the ORIGINAL video — never the new one. The orphaned thread is left to
+        # finish harmlessly; its in-memory write is gated by the _gen check below.
         gen = self._gen
+        vid = self.video
+        video_path = self.video_path
+        params = self._params()
         events = list(self.events)
-        thumb_dir = bolt.thumbs_dir(self.video_path, self._params())
+        thumb_dir = bolt.thumbs_dir(video_path, params)
 
         def prog(done, total):
             if self._gen == gen:
                 self.bolt_progress = (done, total)
 
         try:
-            results = bolt.refine_events(self.video, events, progress=prog,
-                                         thumb_dir=thumb_dir)
-            bolt.save_bolt(self.video_path, self._params(), results)
+            results = bolt.refine_events(vid, events, progress=prog, thumb_dir=thumb_dir)
+            bolt.save_bolt(video_path, params, results)   # correct original-video data -> its own cache
             with self.lock:
-                if self._gen != gen:        # a new video was opened; abandon stale results
+                if self._gen != gen:        # a different video is now current; leave its state alone
                     return
                 self.bolt_results = results
                 self.bolt_status = "done"

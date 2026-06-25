@@ -162,3 +162,25 @@ def test_bolt_thumb_endpoint(clip):
     import io
     from PIL import Image
     assert Image.open(io.BytesIO(r.content)).height <= 240
+
+
+def test_stale_refine_does_not_clobber_after_switch(clip, monkeypatch):
+    """A refine started on video A must not write its results into state after
+    a different video is opened mid-refine."""
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    import bolt as boltmod
+    from app import AppState
+    s = AppState(clip.path)
+    s.ensure_events()
+    monkeypatch.setattr(boltmod, "load_bolt", lambda *a, **k: None)   # force a fresh refine
+    monkeypatch.setattr(boltmod, "save_bolt", lambda *a, **k: None)   # don't touch disk
+
+    def refine_then_switch(video, events, **kw):
+        s._gen += 1                      # simulate the user opening another video mid-refine
+        return [boltmod.BoltResult(0, 0, 1.0, 100, True)]
+
+    monkeypatch.setattr(boltmod, "refine_events", refine_then_switch)
+    s.start_bolt_refine()
+    s._bolt_thread.join(5)
+    assert s.bolt_results is None        # stale results were discarded
+    assert s.bolt_status != "done"       # never advanced to done for the stale pass

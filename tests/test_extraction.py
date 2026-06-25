@@ -45,3 +45,11 @@ def test_frame_png_bytes(clip):
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     im = Image.open(io.BytesIO(data))
     assert im.size == (320, 180)
+
+
+def test_thumb_jpeg_bytes(clip):
+    v = VideoFile(clip.path)
+    data = v.thumb_jpeg_bytes(50, height=120)
+    assert data[:3] == b"\xff\xd8\xff"          # JPEG magic
+    im = Image.open(io.BytesIO(data))
+    assert im.height == 120

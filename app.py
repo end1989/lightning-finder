@@ -54,28 +54,39 @@ class AppState:
     def _params(self):
         return {"sensitivity": self.sensitivity}
 
+    def _ensure_brightness(self):
+        """Load the brightness/times arrays from cache, or scan once and cache.
+
+        Brightness is sensitivity-independent, so caching it makes reopening a
+        video AND every rescan instant — only the cheap detect step re-runs per
+        sensitivity. (Previously rescan re-decoded the whole video because the
+        brightness was never restored after a cache-hit load.)
+        """
+        if self.brightness is not None:
+            return
+        cached = detector.load_brightness(self.video_path)
+        if cached is not None:
+            self.brightness, self.times = cached
+            return
+        self.brightness, self.times = detector.scan_brightness(
+            self.video, progress=_scan_progress)
+        detector.save_brightness(self.video_path, self.brightness, self.times)
+
     def ensure_events(self):
         with self.lock:
             if self.events:
                 return self.events
-            cached = detector.load_events(self.video_path, self._params())
-            if cached is not None:
-                self.events = cached
-                return self.events
-            self.brightness, self.times = detector.scan_brightness(self.video, progress=_scan_progress)
+            self._ensure_brightness()
             self.events = detector.detect_flashes(
                 self.brightness, self.times, self.video.meta.fps, self.sensitivity)
-            detector.save_events(self.video_path, self._params(), self.events)
             return self.events
 
     def rescan(self, sensitivity):
         with self.lock:
             self.sensitivity = sensitivity
-            if self.brightness is None:
-                self.brightness, self.times = detector.scan_brightness(self.video, progress=_scan_progress)
+            self._ensure_brightness()
             self.events = detector.detect_flashes(
                 self.brightness, self.times, self.video.meta.fps, sensitivity)
-            detector.save_events(self.video_path, self._params(), self.events)
             return self.events
 
 

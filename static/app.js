@@ -54,7 +54,7 @@ function wireSkeleton() {
   $("timeline").addEventListener("click", (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const frac = (e.clientX - r.left) / r.width;
-    seekToFrame(Math.round(frac * (state.frameCount || 1)));
+    seekToFrame(Math.round(frac * ((state.frameCount || 1) - 1)));
   });
 }
 

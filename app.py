@@ -172,6 +172,15 @@ def create_app(video_path=None) -> FastAPI:
             raise HTTPException(404, "frame out of range")
         return Response(content=data, media_type="image/png")
 
+    @app.get("/api/frame/{index}.jpg")
+    def frame_jpg(index: int):
+        # Fast native-res JPEG preview for precision-mode display (grab uses .png).
+        try:
+            data = state.video.frame_jpeg_bytes(index)
+        except IndexError:
+            raise HTTPException(404, "frame out of range")
+        return Response(content=data, media_type="image/jpeg")
+
     @app.get("/api/thumb/{index}.jpg")
     def thumb(index: int):
         return Response(content=state.video.thumb_jpeg_bytes(index),

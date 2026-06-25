@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import av
@@ -27,6 +28,12 @@ class VideoFile:
         self._pts: list[int | None] = []
         self._indexed = False
         self._index_lock = threading.Lock()
+        # Small LRU of recently decoded native-res frames + neighbor prefetch,
+        # so stepping back/forth and display->grab reuse a decoded frame.
+        self._frame_cache: "OrderedDict[int, np.ndarray]" = OrderedDict()
+        self._cache_lock = threading.Lock()
+        self._cache_max = 8
+        self._inflight: set[int] = set()
 
     @property
     def meta(self) -> VideoMeta:
@@ -82,15 +89,61 @@ class VideoFile:
                 self._meta.frame_count = idx
 
     def frame(self, index) -> np.ndarray:
-        """Return the exact frame at `index` as native-res RGB uint8 ndarray.
+        """Return the frame at `index` as a native-res RGB uint8 ndarray.
 
-        Fast by design. If a full PTS index already exists (built by a prior
-        scan via iter_frames), seek by the recorded PTS for exactness even on
+        Backed by a small LRU cache plus opportunistic neighbor prefetch, so
+        stepping back and forth (and the display->grab of the same frame) reuse
+        an already-decoded frame instead of re-seeking the file.
+        """
+        arr = self._cached_decode(index)
+        self._prefetch_neighbors(index)
+        return arr
+
+    def _cached_decode(self, index) -> np.ndarray:
+        with self._cache_lock:
+            cached = self._frame_cache.get(index)
+            if cached is not None:
+                self._frame_cache.move_to_end(index)
+                return cached
+        arr = self._decode_frame(index)
+        with self._cache_lock:
+            self._frame_cache[index] = arr
+            self._frame_cache.move_to_end(index)
+            while len(self._frame_cache) > self._cache_max:
+                self._frame_cache.popitem(last=False)
+        return arr
+
+    def _prefetch_neighbors(self, index):
+        """Decode the adjacent frames in the background so the next step is warm."""
+        fc = self.meta.frame_count
+        for nb in (index + 1, index - 1):
+            if nb < 0 or (fc and nb >= fc):
+                continue
+            with self._cache_lock:
+                if nb in self._frame_cache or nb in self._inflight:
+                    continue
+                self._inflight.add(nb)
+            threading.Thread(target=self._prefetch_one, args=(nb,), daemon=True).start()
+
+    def _prefetch_one(self, nb):
+        try:
+            self._cached_decode(nb)
+        except Exception:
+            pass
+        finally:
+            with self._cache_lock:
+                self._inflight.discard(nb)
+
+    def _decode_frame(self, index) -> np.ndarray:
+        """Decode the exact frame at `index` (native-res RGB uint8 ndarray).
+
+        If a full PTS index already exists (built by a prior scan via
+        iter_frames), seek by the recorded PTS for exactness even on
         variable-frame-rate footage. Otherwise seek by estimated time
-        (index/fps) and decode forward to the target frame: frame-accurate for
-        constant-frame-rate video without a full decode pass. We never build the
-        whole index here — doing so would stall the first precision-mode frame
-        for minutes on a long 4K video whose events were loaded from cache.
+        (index/fps) and decode forward: frame-accurate for constant-frame-rate
+        video without a full decode pass. We never build the whole index here —
+        doing so would stall the first precision frame for minutes on a long 4K
+        video whose events were loaded from cache.
         """
         fc = self.meta.frame_count
         if fc and not (0 <= index < fc):
@@ -129,8 +182,20 @@ class VideoFile:
         raise IndexError(f"frame {index} not found")
 
     def frame_png_bytes(self, index) -> bytes:
+        """Lossless native-resolution PNG — used for the full-quality grab."""
         buf = io.BytesIO()
         Image.fromarray(self.frame(index)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def frame_jpeg_bytes(self, index, quality=92) -> bytes:
+        """Native-resolution JPEG — fast preview for precision-mode display.
+
+        Encodes ~30x faster than PNG and transfers far smaller, so frame
+        stepping is responsive on long 4K footage; the grab still uses the
+        lossless PNG above.
+        """
+        buf = io.BytesIO()
+        Image.fromarray(self.frame(index)).save(buf, format="JPEG", quality=quality)
         return buf.getvalue()
 
     def thumb_jpeg_bytes(self, index, height=120) -> bytes:

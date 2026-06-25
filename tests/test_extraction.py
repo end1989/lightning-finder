@@ -77,3 +77,22 @@ def test_frame_uses_prebuilt_index_when_available(clip):
     list(v.iter_frames())                          # builds the PTS index
     assert v._indexed is True
     assert _mean(v.frame(122)) > _mean(v.frame(123))   # peak 122 > 123
+
+
+def test_frame_jpeg_bytes_native_res(clip):
+    """The fast display preview is a native-resolution JPEG (not downscaled)."""
+    v = VideoFile(clip.path)
+    data = v.frame_jpeg_bytes(50)
+    assert data[:3] == b"\xff\xd8\xff"             # JPEG magic
+    im = Image.open(io.BytesIO(data))
+    assert im.size == (320, 180)                   # native res preserved
+    assert _mean(np.asarray(im)) > 150             # still the bright frame
+
+
+def test_frame_cache_reuses_decode(clip):
+    """A decoded frame is cached, so re-requesting it returns the same array."""
+    v = VideoFile(clip.path)
+    a = v.frame(50)
+    assert 50 in v._frame_cache
+    b = v.frame(50)
+    assert a is b                                  # served from cache, not re-decoded

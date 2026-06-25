@@ -178,7 +178,8 @@ function exitPrecision() {
 function showFrame(f) {
   f = Math.max(0, Math.min((state.frameCount || 1) - 1, f));
   state.curFrame = f;
-  frameImg.src = `/api/frame/${f}.png`;
+  // Fast JPEG preview for display; Grab still pulls the lossless full-res PNG.
+  frameImg.src = `/api/frame/${f}.jpg`;
   updateTimeLabel(f);
   setPlayhead(state.duration ? (f / state.fps) / state.duration : 0);
   highlightActive(f);

@@ -41,21 +41,36 @@ def _scan_progress(done, total):
 
 
 class AppState:
-    def __init__(self, video_path):
-        self.video = VideoFile(video_path)
-        self.video_path = str(video_path)
+    def __init__(self, video_path=None):
+        self.lock = threading.Lock()
+        self._reset_empty()
+        if video_path:
+            self.load(video_path)
+
+    def _reset_empty(self):
+        self.video = None
+        self.video_path = None
         self.sensitivity = 0.5
         self.events = []
         self.brightness = None
         self.times = None
         self.markers: dict[int, dict] = {}
-        self.output_dir = Path("output") / Path(video_path).stem
-        self.lock = threading.Lock()
-        # bolt ("best shots") refine state
-        self.bolt_results = None          # list[bolt.BoltResult] aligned with events
-        self.bolt_status = "idle"         # idle | running | done | error
-        self.bolt_progress = (0, 0)       # (done, total)
+        self.output_dir = None
+        self.bolt_results = None
+        self.bolt_status = "idle"
+        self.bolt_progress = (0, 0)
         self._bolt_thread = None
+
+    def load(self, video_path):
+        with self.lock:
+            self._reset_empty()
+            self.video = VideoFile(video_path)
+            self.video_path = str(video_path)
+            self.output_dir = Path("output") / Path(video_path).stem
+
+    @property
+    def loaded(self):
+        return self.video is not None
 
     def _params(self):
         return {"sensitivity": self.sensitivity}
@@ -179,14 +194,23 @@ class MarkerBody(BaseModel):
     status: str = "confirmed"
 
 
+class OpenBody(BaseModel):
+    path: str
+
+
 def create_app(video_path=None) -> FastAPI:
     video_path = video_path or os.environ.get("LF_VIDEO")
-    if not video_path:
-        raise RuntimeError("No video provided (set LF_VIDEO or pass video_path)")
-    state = AppState(video_path)
+    state = AppState(video_path)        # empty if no path/env
     app = FastAPI()
     app.state.lf = state
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
+                  ".mpg", ".mpeg", ".wmv"}
+
+    def need_video():
+        if state.video is None:
+            raise HTTPException(409, "No video loaded")
 
     @app.get("/", response_class=HTMLResponse)
     def index():
@@ -196,31 +220,86 @@ def create_app(video_path=None) -> FastAPI:
     def favicon():
         return Response(status_code=204)
 
+    @app.get("/api/state")
+    def app_state():
+        if state.video is None:
+            return {"loaded": False}
+        m = state.video.meta
+        return {"loaded": True, "name": Path(state.video_path).name,
+                "width": m.width, "height": m.height, "fps": m.fps,
+                "frame_count": m.frame_count, "duration": m.duration}
+
+    @app.get("/api/browse")
+    def browse(path: str = ""):
+        import string
+        if not path:
+            if os.name == "nt":
+                drives = [f"{d}:\\" for d in string.ascii_uppercase
+                          if os.path.exists(f"{d}:\\")]
+                return {"path": "", "parent": None, "dirs": drives, "videos": []}
+            path = os.path.expanduser("~")
+        path = os.path.abspath(path)
+        if not os.path.isdir(path):
+            raise HTTPException(400, "not a directory")
+        dirs, videos = [], []
+        try:
+            entries = sorted(os.listdir(path), key=str.lower)
+        except PermissionError:
+            raise HTTPException(403, "permission denied")
+        for name in entries:
+            full = os.path.join(path, name)
+            try:
+                if os.path.isdir(full):
+                    dirs.append(full)
+                elif os.path.splitext(name)[1].lower() in VIDEO_EXTS:
+                    videos.append(full)
+            except OSError:
+                continue
+        up = os.path.dirname(path)
+        parent = "" if up == path else up        # "" -> drive list on Windows
+        return {"path": path, "parent": parent, "dirs": dirs, "videos": videos}
+
+    @app.post("/api/open")
+    def open_video(body: OpenBody):
+        if not os.path.isfile(body.path):
+            raise HTTPException(400, "not a file")
+        state.load(body.path)
+        m = state.video.meta
+        return {"ok": True, "name": Path(body.path).name,
+                "width": m.width, "height": m.height, "fps": m.fps,
+                "frame_count": m.frame_count, "duration": m.duration}
+
     @app.get("/api/video/meta")
     def meta():
+        need_video()
         m = state.video.meta
         return {"fps": m.fps, "frame_count": m.frame_count,
                 "duration": m.duration, "width": m.width, "height": m.height}
 
     @app.get("/api/events")
     def events():
+        need_video()
         return {"events": [_ev_json(state, e) for e in state.ensure_events()]}
 
     @app.post("/api/scan")
     def scan(body: ScanBody):
+        need_video()
         return {"events": [_ev_json(state, e) for e in state.rescan(body.sensitivity)]}
 
     @app.post("/api/refine-bolts")
     def refine_bolts():
+        need_video()
         state.start_bolt_refine()
         return _bolt_status_json(state)
 
     @app.get("/api/refine-bolts")
     def refine_bolts_status():
+        need_video()
         return _bolt_status_json(state)
 
     @app.get("/video")
     def video(request: Request):
+        need_video()
         path = state.video_path
         size = os.path.getsize(path)
         media = mimetypes.guess_type(path)[0] or "video/mp4"
@@ -252,6 +331,7 @@ def create_app(video_path=None) -> FastAPI:
 
     @app.get("/api/frame/{index}.png")
     def frame_png(index: int):
+        need_video()
         try:
             data = state.video.frame_png_bytes(index)
         except IndexError:
@@ -260,6 +340,7 @@ def create_app(video_path=None) -> FastAPI:
 
     @app.get("/api/frame/{index}.jpg")
     def frame_jpg(index: int):
+        need_video()
         # Fast native-res JPEG preview for precision-mode display (grab uses .png).
         try:
             data = state.video.frame_jpeg_bytes(index)
@@ -269,11 +350,13 @@ def create_app(video_path=None) -> FastAPI:
 
     @app.get("/api/thumb/{index}.jpg")
     def thumb(index: int):
+        need_video()
         return Response(content=state.video.thumb_jpeg_bytes(index),
                         media_type="image/jpeg")
 
     @app.post("/api/grab")
     def grab(body: GrabBody):
+        need_video()
         state.output_dir.mkdir(parents=True, exist_ok=True)
         t = body.index / (state.video.meta.fps or 30.0)
         ts = _fmt_ts(t).replace(":", "-")
@@ -284,15 +367,18 @@ def create_app(video_path=None) -> FastAPI:
 
     @app.get("/api/markers")
     def get_markers():
+        need_video()
         return {str(k): v for k, v in state.markers.items()}
 
     @app.post("/api/markers")
     def set_marker(body: MarkerBody):
+        need_video()
         state.markers[body.peak_frame] = {"label": body.label, "status": body.status}
         return {"ok": True}
 
     @app.get("/api/export")
     def export(fmt: str = "csv"):
+        need_video()
         evs = state.ensure_events()
         if fmt == "json":
             return JSONResponse([_ev_json(state, e) for e in evs])
@@ -315,11 +401,8 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    if len(sys.argv) < 2:
-        print("usage: python app.py <video_path> [port]")
-        sys.exit(1)
-    os.environ["LF_VIDEO"] = sys.argv[1]
+    path = sys.argv[1] if len(sys.argv) > 1 else None     # optional shortcut
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
-    application = create_app(sys.argv[1])
+    application = create_app(path)
     webbrowser.open(f"http://127.0.0.1:{port}")
     uvicorn.run(application, host="127.0.0.1", port=port)

@@ -112,3 +112,35 @@ def test_refine_bolts_endpoint(clip):
     assert all("is_bolt" in e and "bolt_frame" in e for e in r["events"])
     scores = [e["bolt_score"] for e in r["events"]]
     assert scores == sorted(scores, reverse=True)        # ranked by bolt strength
+
+
+def test_state_no_video(monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/state").json() == {"loaded": False}
+
+
+def test_data_endpoint_409_without_video(monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/events").status_code == 409
+
+
+def test_open_then_meta(clip, monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/state").json()["loaded"] is False
+    r = c.post("/api/open", json={"path": clip.path})
+    assert r.status_code == 200 and r.json()["width"] == 320
+    assert c.get("/api/video/meta").json()["width"] == 320
+    assert c.get("/api/state").json()["loaded"] is True
+
+
+def test_browse_lists_clip(clip, monkeypatch):
+    import os
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    d = os.path.dirname(os.path.abspath(clip.path))
+    r = c.get("/api/browse", params={"path": d}).json()
+    assert r["path"] == d
+    assert any(os.path.basename(v) == os.path.basename(clip.path) for v in r["videos"])

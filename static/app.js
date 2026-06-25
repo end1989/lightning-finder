@@ -306,67 +306,74 @@ function wireExport() {
   });
 
   $("btn-best-shots").addEventListener("click", startBestShots);
+  $("gallery-close").addEventListener("click", closeGallery);
 }
 
-// ---- Best Shots: rank flashes by lightning-channel strength ----------------
+// ---- Best Shots gallery ----------------------------------------------------
 let _boltPoll = null;
 
+function openGallery() { $("gallery").hidden = false; }
+function closeGallery() { $("gallery").hidden = true; }
+
 async function startBestShots() {
+  openGallery();
+  $("gallery-grid").innerHTML =
+    '<div class="gal-msg">Finding best shots… checking each flash for a real channel.</div>';
   try {
     const r = await (await fetch("/api/refine-bolts", { method: "POST" })).json();
-    if (r.status === "done") { applyBestShots(r); return; }
-    $("flash-list").innerHTML =
-      '<li class="scanning">Finding best shots… checking each flash for a real channel.</li>';
+    if (r.status === "done") { onBolts(r); return; }
     clearInterval(_boltPoll);
-    _boltPoll = setInterval(pollBestShots, 1200);
+    _boltPoll = setInterval(pollBolts, 1200);
   } catch (e) {
-    toast(`Best Shots error: ${e.message}`);
+    $("gallery-grid").innerHTML = `<div class="gal-msg">Error: ${e.message}</div>`;
   }
 }
 
-async function pollBestShots() {
+async function pollBolts() {
   try {
     const r = await (await fetch("/api/refine-bolts")).json();
     if (r.status === "running") {
       const pct = r.total ? Math.round((100 * r.done) / r.total) : 0;
-      $("flash-list").innerHTML =
-        `<li class="scanning">Finding best shots… ${r.done}/${r.total} (${pct}%)</li>`;
+      $("gallery-grid").innerHTML =
+        `<div class="gal-msg">Finding best shots… ${r.done}/${r.total} (${pct}%)</div>`;
     } else if (r.status === "done") {
-      clearInterval(_boltPoll); _boltPoll = null;
-      applyBestShots(r);
+      clearInterval(_boltPoll); _boltPoll = null; onBolts(r);
     } else if (r.status === "error") {
       clearInterval(_boltPoll); _boltPoll = null;
-      toast("Best Shots failed");
+      $("gallery-grid").innerHTML = '<div class="gal-msg">Best Shots failed.</div>';
     }
   } catch (e) { /* transient; keep polling */ }
 }
 
-function applyBestShots(r) {
-  state.events = r.events;            // sorted by channel strength, with bolt fields
-  state.bestShots = true;
-  renderTimeline();
-  renderBestShots(r.events);
-  $("flash-count").textContent = `· ${r.n_bolts} bolts / ${r.events.length}`;
-  toast(`${r.n_bolts} real bolts found`);
+function onBolts(r) {
+  state.boltItems = (r.events || []).filter((e) => e.is_bolt);
+  $("gallery-title").textContent = `⚡ Best Shots · ${state.boltItems.length} bolts`;
+  renderGallery();
 }
 
-function renderBestShots(items) {
-  const ol = $("flash-list");
-  ol.innerHTML = "";
-  items.forEach((e) => {
-    const target = e.bolt_frame != null ? e.bolt_frame : e.peak_frame;
-    const li = document.createElement("li");
-    li.dataset.peak = e.peak_frame;
-    li.dataset.target = target;
-    if (!e.is_bolt) li.classList.add("glow");
-    const left = document.createElement("span");
-    left.textContent = `${e.is_bolt ? "⚡" : "·"} ${e.bolt_timecode || e.timecode}`;
-    const right = document.createElement("span");
-    right.className = "muted";
-    right.textContent = e.is_bolt ? `${Math.round(e.bolt_score)}` : "glow";
-    li.append(left, right);
-    li.addEventListener("click", () => enterPrecision(target));
-    ol.appendChild(li);
+function renderGallery() {
+  const grid = $("gallery-grid");
+  grid.innerHTML = "";
+  if (!state.boltItems || !state.boltItems.length) {
+    grid.innerHTML = '<div class="gal-msg">No clear lightning channels found.</div>';
+    return;
+  }
+  state.boltItems.forEach((e) => {
+    const card = document.createElement("div");
+    card.className = "shot";
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = `/api/bolt-thumb/${e.bolt_frame}.jpg`;
+    const cap = document.createElement("div");
+    cap.className = "cap";
+    const tc = document.createElement("span");
+    tc.textContent = e.bolt_timecode || e.timecode;
+    const sc = document.createElement("b");
+    sc.textContent = Math.round(e.bolt_score);
+    cap.append(tc, sc);
+    card.append(img, cap);
+    card.addEventListener("click", () => { closeGallery(); enterPrecision(e.bolt_frame); });
+    grid.appendChild(card);
   });
 }
 
@@ -398,6 +405,10 @@ function currentFlash() {
 function wireKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
+    if (!$("gallery").hidden) {
+      if (e.key === "Escape") { e.preventDefault(); closeGallery(); }
+      return;                       // gallery open: swallow other shortcuts
+    }
     switch (e.key) {
       case "ArrowLeft":  e.preventDefault(); e.shiftKey ? jumpToFlash(-1) : stepFrame(-1); break;
       case "ArrowRight": e.preventDefault(); e.shiftKey ? jumpToFlash(1)  : stepFrame(1);  break;

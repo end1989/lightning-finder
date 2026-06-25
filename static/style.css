@@ -55,3 +55,18 @@ button.primary { background:var(--accent); color:#000; font-weight:600; }
 .entry:hover { background:#1f2636; }
 .entry.video { color:var(--accent); }
 .entry .ico { width:18px; text-align:center; }
+#gallery { position:fixed; inset:0; z-index:50; background:rgba(8,11,18,.97);
+           display:flex; flex-direction:column; padding:14px; }
+#gallery-head { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+#gallery-title { font-size:15px; color:var(--accent); font-weight:600; }
+#gallery-close { margin-left:auto; }
+#gallery-grid { flex:1; overflow:auto; display:grid; gap:10px; align-content:start;
+                grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); }
+.shot { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+        overflow:hidden; cursor:pointer; }
+.shot:hover { border-color:var(--accent); }
+.shot img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:#000; }
+.shot .cap { display:flex; justify-content:space-between; padding:5px 8px; font-size:12px;
+             color:var(--muted); }
+.shot .cap b { color:var(--accent); }
+.gal-msg { grid-column:1/-1; color:var(--muted); padding:24px; font-style:italic; }

@@ -144,3 +144,12 @@ def test_browse_lists_clip(clip, monkeypatch):
     r = c.get("/api/browse", params={"path": d}).json()
     assert r["path"] == d
     assert any(os.path.basename(v) == os.path.basename(clip.path) for v in r["videos"])
+
+
+def test_open_invalid_file_returns_400(tmp_path, monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    bad = tmp_path / "notvideo.mp4"
+    bad.write_bytes(b"not a real video at all")
+    c = TestClient(create_app(None))
+    assert c.post("/api/open", json={"path": str(bad)}).status_code == 400
+    assert c.get("/api/state").json()["loaded"] is False

@@ -5,6 +5,7 @@ import csv
 import io
 import mimetypes
 import os
+import string
 import threading
 from pathlib import Path
 
@@ -20,6 +21,9 @@ import detector
 from video import VideoFile
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
+              ".mpg", ".mpeg", ".wmv"}
 
 
 def _fmt_ts(seconds: float) -> str:
@@ -43,6 +47,7 @@ def _scan_progress(done, total):
 class AppState:
     def __init__(self, video_path=None):
         self.lock = threading.Lock()
+        self._gen = 0
         self._reset_empty()
         if video_path:
             self.load(video_path)
@@ -64,6 +69,7 @@ class AppState:
     def load(self, video_path):
         with self.lock:
             self._reset_empty()
+            self._gen += 1
             self.video = VideoFile(video_path)
             self.video_path = str(video_path)
             self.output_dir = Path("output") / Path(video_path).stem
@@ -133,20 +139,25 @@ class AppState:
             self._bolt_thread.start()
 
     def _run_bolt_refine(self):
-        events = list(self.events)        # snapshot the event set we're refining
+        gen = self._gen
+        events = list(self.events)
 
         def prog(done, total):
-            self.bolt_progress = (done, total)
+            if self._gen == gen:
+                self.bolt_progress = (done, total)
 
         try:
             results = bolt.refine_events(self.video, events, progress=prog)
             bolt.save_bolt(self.video_path, self._params(), results)
             with self.lock:
+                if self._gen != gen:        # a new video was opened; abandon stale results
+                    return
                 self.bolt_results = results
                 self.bolt_status = "done"
-        except Exception as exc:          # pragma: no cover - defensive
+        except Exception as exc:            # pragma: no cover - defensive
             with self.lock:
-                self.bolt_status = "error"
+                if self._gen == gen:
+                    self.bolt_status = "error"
             print(f"[bolt] refine failed: {exc}", flush=True)
 
 
@@ -205,9 +216,6 @@ def create_app(video_path=None) -> FastAPI:
     app.state.lf = state
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
-                  ".mpg", ".mpeg", ".wmv"}
-
     def need_video():
         if state.video is None:
             raise HTTPException(409, "No video loaded")
@@ -231,7 +239,6 @@ def create_app(video_path=None) -> FastAPI:
 
     @app.get("/api/browse")
     def browse(path: str = ""):
-        import string
         if not path:
             if os.name == "nt":
                 drives = [f"{d}:\\" for d in string.ascii_uppercase
@@ -263,8 +270,12 @@ def create_app(video_path=None) -> FastAPI:
     def open_video(body: OpenBody):
         if not os.path.isfile(body.path):
             raise HTTPException(400, "not a file")
-        state.load(body.path)
-        m = state.video.meta
+        try:
+            state.load(body.path)
+            m = state.video.meta
+        except Exception:
+            state._reset_empty()
+            raise HTTPException(400, "not a valid video file")
         return {"ok": True, "name": Path(body.path).name,
                 "width": m.width, "height": m.height, "fps": m.fps,
                 "frame_count": m.frame_count, "duration": m.duration}

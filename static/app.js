@@ -206,3 +206,50 @@ function wirePrecision() {
   $("btn-frame-fwd").addEventListener("click", () => stepFrame(1));
   $("btn-grab").addEventListener("click", grab);
 }
+
+// ---- Task 8: export, keyboard, markers, rescan -------------------------
+function wireExport() {
+  $("btn-export-csv").addEventListener("click", () => { window.location = "/api/export?fmt=csv"; });
+  $("btn-export-json").addEventListener("click", () => { window.location = "/api/export?fmt=json"; });
+
+  $("btn-prev-flash").addEventListener("click", () => jumpToFlash(-1));
+  $("btn-next-flash").addEventListener("click", () => jumpToFlash(1));
+
+  $("btn-rescan").addEventListener("click", async () => {
+    const sensitivity = parseFloat($("sensitivity").value);
+    const r = await (await fetch("/api/scan", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sensitivity }),
+    })).json();
+    state.events = r.events;
+    renderTimeline();
+    renderList();
+    toast(`Found ${state.events.length} flashes`);
+  });
+}
+
+async function setStatus(peakFrame, status) {
+  await fetch("/api/markers", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ peak_frame: peakFrame, status }),
+  });
+  const e = state.events.find((x) => x.peak_frame === peakFrame);
+  if (e) e.status = status;
+  renderList();
+}
+
+function wireKeyboard() {
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    switch (e.key) {
+      case "ArrowLeft":  e.preventDefault(); e.shiftKey ? jumpToFlash(-1) : stepFrame(-1); break;
+      case "ArrowRight": e.preventDefault(); e.shiftKey ? jumpToFlash(1)  : stepFrame(1);  break;
+      case " ":          e.preventDefault(); togglePlay(); break;
+      case "g": case "G": grab(); break;
+      case ",": stepTime(-0.1); break;
+      case ".": stepTime(0.1); break;
+      case "x": case "X": if (state.events.length) setStatus(state.curFrame, "rejected"); break;
+      case "c": case "C": if (state.events.length) setStatus(state.curFrame, "confirmed"); break;
+    }
+  });
+}

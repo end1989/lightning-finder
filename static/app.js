@@ -178,7 +178,7 @@ function showFrame(f) {
 }
 
 function stepFrame(d) {
-  if (state.mode !== "precision") enterPrecision(curFrameFromVideo());
+  if (state.mode !== "precision") enterPrecision(curFrameFromVideo() + d);
   else showFrame(state.curFrame + d);
 }
 
@@ -188,12 +188,17 @@ function stepTime(dt) {
 }
 
 async function grab() {
-  const r = await fetch("/api/grab", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ index: state.curFrame }),
-  });
-  const data = await r.json();
-  toast(`Saved ${data.path}`);
+  try {
+    const r = await fetch("/api/grab", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index: state.curFrame }),
+    });
+    if (!r.ok) { toast(`Grab failed: ${r.status}`); return; }
+    const data = await r.json();
+    toast(`Saved ${data.path}`);
+  } catch (e) {
+    toast(`Grab error: ${e.message}`);
+  }
 }
 
 function wirePrecision() {

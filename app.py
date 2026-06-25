@@ -22,11 +22,21 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _fmt_ts(seconds: float) -> str:
-    ms = int(round((seconds - int(seconds)) * 1000))
-    s = int(seconds)
+    total_ms = int(round(seconds * 1000))
+    ms = total_ms % 1000
+    s = total_ms // 1000
     h, s = divmod(s, 3600)
     m, s = divmod(s, 60)
     return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+def _scan_progress(done, total):
+    """Print scan progress to the terminal for long videos (quiet for short clips)."""
+    if not total or total < 1500:
+        return
+    step = max(1, total // 20)  # ~every 5%
+    if done % step == 0 or done == total:
+        print(f"[scan] {done}/{total} frames ({100 * done // total}%)", flush=True)
 
 
 class AppState:
@@ -52,7 +62,7 @@ class AppState:
             if cached is not None:
                 self.events = cached
                 return self.events
-            self.brightness, self.times = detector.scan_brightness(self.video)
+            self.brightness, self.times = detector.scan_brightness(self.video, progress=_scan_progress)
             self.events = detector.detect_flashes(
                 self.brightness, self.times, self.video.meta.fps, self.sensitivity)
             detector.save_events(self.video_path, self._params(), self.events)
@@ -62,7 +72,7 @@ class AppState:
         with self.lock:
             self.sensitivity = sensitivity
             if self.brightness is None:
-                self.brightness, self.times = detector.scan_brightness(self.video)
+                self.brightness, self.times = detector.scan_brightness(self.video, progress=_scan_progress)
             self.events = detector.detect_flashes(
                 self.brightness, self.times, self.video.meta.fps, sensitivity)
             detector.save_events(self.video_path, self._params(), self.events)
@@ -104,6 +114,10 @@ def create_app(video_path=None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index():
         return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return Response(status_code=204)
 
     @app.get("/api/video/meta")
     def meta():

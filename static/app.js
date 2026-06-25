@@ -79,10 +79,17 @@ main();
 
 // ---- Task 6: events, timeline markers, flash list, navigation ----------
 async function loadEvents() {
-  const r = await (await fetch("/api/events")).json();
-  state.events = r.events;
-  renderTimeline();
-  renderList();
+  const ol = $("flash-list");
+  ol.innerHTML =
+    '<li class="scanning">Scanning for flashes… the first open of a long video can take a few minutes.</li>';
+  try {
+    const r = await (await fetch("/api/events")).json();
+    state.events = r.events;
+    renderTimeline();
+    renderList();
+  } catch (e) {
+    ol.innerHTML = `<li class="scanning">Failed to load flashes: ${e.message}</li>`;
+  }
 }
 
 function setPlayhead(frac) {
@@ -178,7 +185,7 @@ function showFrame(f) {
 }
 
 function stepFrame(d) {
-  if (state.mode !== "precision") enterPrecision(curFrameFromVideo() + d);
+  if (state.mode !== "precision") enterPrecision(curFrameFromVideo());
   else showFrame(state.curFrame + d);
 }
 

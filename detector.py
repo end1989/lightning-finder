@@ -100,11 +100,11 @@ def cache_path(path, params):
 def load_events(path, params):
     cp = cache_path(path, params)
     if os.path.exists(cp):
-        with open(cp) as f:
+        with open(cp, encoding="utf-8") as f:
             return [FlashEvent(**e) for e in json.load(f)]
     return None
 
 
 def save_events(path, params, events):
-    with open(cache_path(path, params), "w") as f:
+    with open(cache_path(path, params), "w", encoding="utf-8") as f:
         json.dump([asdict(e) for e in events], f)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from dataclasses import dataclass
 
 import av
@@ -25,6 +26,7 @@ class VideoFile:
         self._meta: VideoMeta | None = None
         self._pts: list[int | None] = []
         self._indexed = False
+        self._index_lock = threading.Lock()
 
     @property
     def meta(self) -> VideoMeta:
@@ -54,13 +56,13 @@ class VideoFile:
         Records pts per index so frame() can be exact afterward. If
         downscale_height is set, frames are scaled down for cheap analysis.
         """
-        self._pts = []
+        pts_local = []
         with av.open(self.path) as c:
             s = c.streams.video[0]
             tb = s.time_base
             idx = 0
             for frame in c.decode(s):
-                self._pts.append(int(frame.pts) if frame.pts is not None else None)
+                pts_local.append(int(frame.pts) if frame.pts is not None else None)
                 if frame.pts is not None and tb is not None:
                     t = float(frame.pts * tb)
                 else:
@@ -73,23 +75,28 @@ class VideoFile:
                     img = frame.to_ndarray(format="rgb24")
                 yield idx, t, img
                 idx += 1
-        self._indexed = True
-        if self._meta is not None and idx and idx != self._meta.frame_count:
-            self._meta.frame_count = idx
+        with self._index_lock:
+            self._pts = pts_local
+            self._indexed = True
+            if self._meta is not None and idx and idx != self._meta.frame_count:
+                self._meta.frame_count = idx
 
     def _ensure_index(self):
-        """Build the per-index PTS table if not already built (lazy, one pass)."""
+        """Build the per-index PTS table if not already built (lazy, one pass, thread-safe)."""
         if self._indexed:
             return
-        pts: list[int | None] = []
-        with av.open(self.path) as c:
-            s = c.streams.video[0]
-            for frame in c.decode(s):
-                pts.append(int(frame.pts) if frame.pts is not None else None)
-        self._pts = pts
-        self._indexed = True
-        if self._meta is not None and pts and len(pts) != self._meta.frame_count:
-            self._meta.frame_count = len(pts)
+        with self._index_lock:
+            if self._indexed:
+                return
+            pts: list[int | None] = []
+            with av.open(self.path) as c:
+                s = c.streams.video[0]
+                for frame in c.decode(s):
+                    pts.append(int(frame.pts) if frame.pts is not None else None)
+            self._pts = pts
+            self._indexed = True
+            if self._meta is not None and pts and len(pts) != self._meta.frame_count:
+                self._meta.frame_count = len(pts)
 
     def frame(self, index) -> np.ndarray:
         """Return the exact frame at `index` as native-res RGB uint8 ndarray.

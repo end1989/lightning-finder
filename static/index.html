@@ -32,6 +32,7 @@
           <input id="sensitivity" type="range" min="0" max="1" step="0.05" value="0.5">
         </label>
         <button id="btn-rescan">Rescan</button>
+        <button id="btn-best-shots" title="Find the frames with a real lightning channel">⚡ Best Shots</button>
         <button id="btn-grab" class="primary" title="Grab full-quality (G)">⬇ Grab</button>
         <button id="btn-export-csv">CSV</button>
         <button id="btn-export-json">JSON</button>
@@ -39,7 +40,7 @@
     </section>
 
     <aside id="sidebar">
-      <h2>Flashes</h2>
+      <h2>Flashes <span id="flash-count" class="muted"></span></h2>
       <ol id="flash-list"></ol>
     </aside>
   </main>

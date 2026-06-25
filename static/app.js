@@ -240,6 +240,70 @@ function wireExport() {
       toast(`Rescan error: ${err.message}`);
     }
   });
+
+  $("btn-best-shots").addEventListener("click", startBestShots);
+}
+
+// ---- Best Shots: rank flashes by lightning-channel strength ----------------
+let _boltPoll = null;
+
+async function startBestShots() {
+  try {
+    const r = await (await fetch("/api/refine-bolts", { method: "POST" })).json();
+    if (r.status === "done") { applyBestShots(r); return; }
+    $("flash-list").innerHTML =
+      '<li class="scanning">Finding best shots… checking each flash for a real channel.</li>';
+    clearInterval(_boltPoll);
+    _boltPoll = setInterval(pollBestShots, 1200);
+  } catch (e) {
+    toast(`Best Shots error: ${e.message}`);
+  }
+}
+
+async function pollBestShots() {
+  try {
+    const r = await (await fetch("/api/refine-bolts")).json();
+    if (r.status === "running") {
+      const pct = r.total ? Math.round((100 * r.done) / r.total) : 0;
+      $("flash-list").innerHTML =
+        `<li class="scanning">Finding best shots… ${r.done}/${r.total} (${pct}%)</li>`;
+    } else if (r.status === "done") {
+      clearInterval(_boltPoll); _boltPoll = null;
+      applyBestShots(r);
+    } else if (r.status === "error") {
+      clearInterval(_boltPoll); _boltPoll = null;
+      toast("Best Shots failed");
+    }
+  } catch (e) { /* transient; keep polling */ }
+}
+
+function applyBestShots(r) {
+  state.events = r.events;            // sorted by channel strength, with bolt fields
+  state.bestShots = true;
+  renderTimeline();
+  renderBestShots(r.events);
+  $("flash-count").textContent = `· ${r.n_bolts} bolts / ${r.events.length}`;
+  toast(`${r.n_bolts} real bolts found`);
+}
+
+function renderBestShots(items) {
+  const ol = $("flash-list");
+  ol.innerHTML = "";
+  items.forEach((e) => {
+    const target = e.bolt_frame != null ? e.bolt_frame : e.peak_frame;
+    const li = document.createElement("li");
+    li.dataset.peak = e.peak_frame;
+    li.dataset.target = target;
+    if (!e.is_bolt) li.classList.add("glow");
+    const left = document.createElement("span");
+    left.textContent = `${e.is_bolt ? "⚡" : "·"} ${e.bolt_timecode || e.timecode}`;
+    const right = document.createElement("span");
+    right.className = "muted";
+    right.textContent = e.is_bolt ? `${Math.round(e.bolt_score)}` : "glow";
+    li.append(left, right);
+    li.addEventListener("click", () => enterPrecision(target));
+    ol.appendChild(li);
+  });
 }
 
 async function setStatus(peakFrame, status) {

@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .lf_cache_*.json
 .lf_bright_*.npz
+.lf_bolt_*.json
 output/
 test_clip.mp4
 .pytest_cache/

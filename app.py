@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+import bolt
 import detector
 from video import VideoFile
 
@@ -50,6 +51,11 @@ class AppState:
         self.markers: dict[int, dict] = {}
         self.output_dir = Path("output") / Path(video_path).stem
         self.lock = threading.Lock()
+        # bolt ("best shots") refine state
+        self.bolt_results = None          # list[bolt.BoltResult] aligned with events
+        self.bolt_status = "idle"         # idle | running | done | error
+        self.bolt_progress = (0, 0)       # (done, total)
+        self._bolt_thread = None
 
     def _params(self):
         return {"sensitivity": self.sensitivity}
@@ -87,7 +93,46 @@ class AppState:
             self._ensure_brightness()
             self.events = detector.detect_flashes(
                 self.brightness, self.times, self.video.meta.fps, sensitivity)
+            # the event set changed, so any prior bolt refine is stale
+            self.bolt_results = None
+            self.bolt_status = "idle"
+            self.bolt_progress = (0, 0)
             return self.events
+
+    def start_bolt_refine(self):
+        """Kick off (or load from cache) the 'best shots' bolt refine pass."""
+        self.ensure_events()
+        with self.lock:
+            if self.bolt_status == "running":
+                return
+            cached = bolt.load_bolt(self.video_path, self._params())
+            if cached is not None and len(cached) == len(self.events):
+                self.bolt_results = cached
+                self.bolt_status = "done"
+                self.bolt_progress = (len(cached), len(cached))
+                return
+            self.bolt_status = "running"
+            self.bolt_progress = (0, len(self.events))
+            self._bolt_thread = threading.Thread(target=self._run_bolt_refine,
+                                                  daemon=True)
+            self._bolt_thread.start()
+
+    def _run_bolt_refine(self):
+        events = list(self.events)        # snapshot the event set we're refining
+
+        def prog(done, total):
+            self.bolt_progress = (done, total)
+
+        try:
+            results = bolt.refine_events(self.video, events, progress=prog)
+            bolt.save_bolt(self.video_path, self._params(), results)
+            with self.lock:
+                self.bolt_results = results
+                self.bolt_status = "done"
+        except Exception as exc:          # pragma: no cover - defensive
+            with self.lock:
+                self.bolt_status = "error"
+            print(f"[bolt] refine failed: {exc}", flush=True)
 
 
 def _ev_json(state, e):
@@ -96,6 +141,27 @@ def _ev_json(state, e):
             "peak_frame": e.peak_frame, "peak_time": e.peak_time,
             "timecode": _fmt_ts(e.peak_time), "brightness": e.brightness,
             "label": mk.get("label", ""), "status": mk.get("status", "")}
+
+
+def _bolt_status_json(state):
+    """Refine progress, plus the 'best shots' ranking once done."""
+    done, total = state.bolt_progress
+    out = {"status": state.bolt_status, "done": done, "total": total}
+    if state.bolt_status == "done" and state.bolt_results is not None:
+        by_peak = {r.peak_frame: r for r in state.bolt_results}
+        items = []
+        for e in state.ensure_events():
+            j = _ev_json(state, e)
+            r = by_peak.get(e.peak_frame)
+            if r is not None:
+                j.update({"bolt_frame": r.bolt_frame, "bolt_score": r.bolt_score,
+                          "vertical_px": r.vertical_px, "is_bolt": r.is_bolt,
+                          "bolt_timecode": _fmt_ts(r.bolt_frame / (state.video.meta.fps or 30))})
+            items.append(j)
+        items.sort(key=lambda x: x.get("bolt_score", 0.0), reverse=True)
+        out["events"] = items
+        out["n_bolts"] = sum(1 for x in items if x.get("is_bolt"))
+    return out
 
 
 class ScanBody(BaseModel):
@@ -143,6 +209,15 @@ def create_app(video_path=None) -> FastAPI:
     @app.post("/api/scan")
     def scan(body: ScanBody):
         return {"events": [_ev_json(state, e) for e in state.rescan(body.sensitivity)]}
+
+    @app.post("/api/refine-bolts")
+    def refine_bolts():
+        state.start_bolt_refine()
+        return _bolt_status_json(state)
+
+    @app.get("/api/refine-bolts")
+    def refine_bolts_status():
+        return _bolt_status_json(state)
 
     @app.get("/video")
     def video(request: Request):

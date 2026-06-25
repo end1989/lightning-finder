@@ -3,6 +3,7 @@ __pycache__/
 .lf_cache_*.json
 .lf_bright_*.npz
 .lf_bolt_*.json
+.lf_thumbs_*/
 output/
 test_clip.mp4
 .pytest_cache/

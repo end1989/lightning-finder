@@ -112,3 +112,75 @@ def test_refine_bolts_endpoint(clip):
     assert all("is_bolt" in e and "bolt_frame" in e for e in r["events"])
     scores = [e["bolt_score"] for e in r["events"]]
     assert scores == sorted(scores, reverse=True)        # ranked by bolt strength
+
+
+def test_state_no_video(monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/state").json() == {"loaded": False}
+
+
+def test_data_endpoint_409_without_video(monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/events").status_code == 409
+
+
+def test_open_then_meta(clip, monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    assert c.get("/api/state").json()["loaded"] is False
+    r = c.post("/api/open", json={"path": clip.path})
+    assert r.status_code == 200 and r.json()["width"] == 320
+    assert c.get("/api/video/meta").json()["width"] == 320
+    assert c.get("/api/state").json()["loaded"] is True
+
+
+def test_browse_lists_clip(clip, monkeypatch):
+    import os
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    c = TestClient(create_app(None))
+    d = os.path.dirname(os.path.abspath(clip.path))
+    r = c.get("/api/browse", params={"path": d}).json()
+    assert r["path"] == d
+    assert any(os.path.basename(v) == os.path.basename(clip.path) for v in r["videos"])
+
+
+def test_open_invalid_file_returns_400(tmp_path, monkeypatch):
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    bad = tmp_path / "notvideo.mp4"
+    bad.write_bytes(b"not a real video at all")
+    c = TestClient(create_app(None))
+    assert c.post("/api/open", json={"path": str(bad)}).status_code == 400
+    assert c.get("/api/state").json()["loaded"] is False
+
+
+def test_bolt_thumb_endpoint(clip):
+    r = client(clip).get("/api/bolt-thumb/50.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    import io
+    from PIL import Image
+    assert Image.open(io.BytesIO(r.content)).height <= 240
+
+
+def test_stale_refine_does_not_clobber_after_switch(clip, monkeypatch):
+    """A refine started on video A must not write its results into state after
+    a different video is opened mid-refine."""
+    monkeypatch.delenv("LF_VIDEO", raising=False)
+    import bolt as boltmod
+    from app import AppState
+    s = AppState(clip.path)
+    s.ensure_events()
+    monkeypatch.setattr(boltmod, "load_bolt", lambda *a, **k: None)   # force a fresh refine
+    monkeypatch.setattr(boltmod, "save_bolt", lambda *a, **k: None)   # don't touch disk
+
+    def refine_then_switch(video, events, **kw):
+        s._gen += 1                      # simulate the user opening another video mid-refine
+        return [boltmod.BoltResult(0, 0, 1.0, 100, True)]
+
+    monkeypatch.setattr(boltmod, "refine_events", refine_then_switch)
+    s.start_bolt_refine()
+    s._bolt_thread.join(5)
+    assert s.bolt_results is None        # stale results were discarded
+    assert s.bolt_status != "done"       # never advanced to done for the stale pass

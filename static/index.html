@@ -11,6 +11,7 @@
     <h1>⚡ Lightning Finder</h1>
     <span id="res-label" class="muted"></span>
     <span id="mode-label" class="badge">playback</span>
+    <button id="btn-open" title="Open a video">📂 Open</button>
   </header>
 
   <main>
@@ -45,6 +46,13 @@
     </aside>
   </main>
 
+  <div id="open-screen" hidden>
+    <div id="open-panel">
+      <h2>⚡ Open a video</h2>
+      <div id="open-path" class="muted"></div>
+      <div id="open-list"></div>
+    </div>
+  </div>
   <div id="toast" hidden></div>
   <script src="/static/app.js"></script>
 </body>

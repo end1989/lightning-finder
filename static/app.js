@@ -44,13 +44,6 @@ async function initMeta() {
   $("res-label").textContent =
     `${state.meta.width}×${state.meta.height} · ${state.fps.toFixed(2)} fps · ${state.frameCount} frames`;
   video.src = "/video";
-  video.addEventListener("timeupdate", () => {
-    if (state.mode === "playback") {
-      const f = curFrameFromVideo();
-      updateTimeLabel(f);
-      setPlayhead((state.duration ? video.currentTime / state.duration : 0));
-    }
-  });
 }
 
 function wireSkeleton() {
@@ -60,6 +53,13 @@ function wireSkeleton() {
     const frac = (e.clientX - r.left) / r.width;
     seekToFrame(Math.round(frac * ((state.frameCount || 1) - 1)));
   });
+  video.addEventListener("timeupdate", () => {
+    if (state.mode === "playback") {
+      const f = curFrameFromVideo();
+      updateTimeLabel(f);
+      setPlayhead(state.duration ? video.currentTime / state.duration : 0);
+    }
+  });
 }
 
 function toast(msg) {
@@ -67,13 +67,61 @@ function toast(msg) {
   clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), 2500);
 }
 
-async function main() {
+// ---- Open a video (in-browser file browser) --------------------------------
+function showOpenScreen() { $("open-screen").hidden = false; browseTo(""); }
+function hideOpenScreen() { $("open-screen").hidden = true; }
+function baseName(p) { return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p; }
+
+function entryRow(icon, label, onClick, isVideo) {
+  const row = document.createElement("div");
+  row.className = "entry" + (isVideo ? " video" : "");
+  const ic = document.createElement("span"); ic.className = "ico"; ic.textContent = icon;
+  const tx = document.createElement("span"); tx.textContent = label;
+  row.append(ic, tx);
+  row.addEventListener("click", onClick);
+  return row;
+}
+
+async function browseTo(path) {
+  const r = await (await fetch(`/api/browse?path=${encodeURIComponent(path)}`)).json();
+  $("open-path").textContent = r.path || "This PC";
+  const list = $("open-list");
+  list.innerHTML = "";
+  if (r.parent !== null) list.appendChild(entryRow("⬆", "..", () => browseTo(r.parent), false));
+  r.dirs.forEach((d) => list.appendChild(entryRow("📁", baseName(d), () => browseTo(d), false)));
+  r.videos.forEach((v) => list.appendChild(entryRow("🎬", baseName(v), () => openVideo(v), true)));
+  if (!r.dirs.length && !r.videos.length)
+    list.appendChild(entryRow("", "(no folders or videos here)", () => {}, false));
+}
+
+async function openVideo(path) {
+  $("open-path").textContent = "Opening…";
+  const r = await fetch("/api/open", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!r.ok) { toast("Couldn't open that file"); return; }
+  hideOpenScreen();
+  await initVideo();
+}
+
+function wireOpen() { $("btn-open").addEventListener("click", showOpenScreen); }
+
+async function initVideo() {
   await initMeta();
+  state.events = [];
+  if (typeof loadEvents === "function") await loadEvents();
+}
+
+async function main() {
   wireSkeleton();
-  if (typeof loadEvents === "function") await loadEvents();   // Task 6
-  if (typeof wireKeyboard === "function") wireKeyboard();     // Task 8
-  if (typeof wirePrecision === "function") wirePrecision();   // Task 7
-  if (typeof wireExport === "function") wireExport();         // Task 8
+  wireOpen();
+  if (typeof wireKeyboard === "function") wireKeyboard();
+  if (typeof wirePrecision === "function") wirePrecision();
+  if (typeof wireExport === "function") wireExport();
+  const st = await (await fetch("/api/state")).json();
+  if (st.loaded) await initVideo();
+  else showOpenScreen();
 }
 main();
 

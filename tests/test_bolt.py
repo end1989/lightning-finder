@@ -1,5 +1,8 @@
+import io
+
 import cv2
 import numpy as np
+from PIL import Image
 
 import bolt
 import detector
@@ -44,3 +47,19 @@ def test_bolt_cache_roundtrip(clip):
     bolt.save_bolt(clip.path, params, results)
     loaded = bolt.load_bolt(clip.path, params)
     assert loaded == results
+
+
+def test_make_thumbnail_jpeg_height():
+    rgb = np.full((1080, 1920, 3), 80, np.uint8)
+    data = bolt.make_thumbnail(rgb, height=240)
+    assert data[:3] == b"\xff\xd8\xff"
+    im = Image.open(io.BytesIO(data))
+    assert im.height == 240 and im.width == 426
+
+
+def test_save_bolt_thumb_writes_file(tmp_path):
+    rgb = np.full((1080, 1920, 3), 80, np.uint8)
+    bolt.save_bolt_thumb(rgb, str(tmp_path / "thumbs"), 123)
+    p = tmp_path / "thumbs" / "123.jpg"
+    assert p.exists()
+    assert Image.open(p).height == 240

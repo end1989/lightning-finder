@@ -139,15 +139,19 @@ class AppState:
             self._bolt_thread.start()
 
     def _run_bolt_refine(self):
-        # Snapshot everything tied to the current video. If the user opens a
-        # different video mid-refine, this thread keeps decoding (and caching to)
-        # the ORIGINAL video — never the new one. The orphaned thread is left to
-        # finish harmlessly; its in-memory write is gated by the _gen check below.
-        gen = self._gen
-        vid = self.video
-        video_path = self.video_path
-        params = self._params()
-        events = list(self.events)
+        # Snapshot everything tied to the current video UNDER THE LOCK, so a
+        # concurrent /api/open (which mutates these fields under the same lock)
+        # can't be observed half-applied. If the user opens a different video
+        # mid-refine, this thread keeps decoding (and caching to) the ORIGINAL
+        # video; its in-memory write is gated by the _gen check below.
+        with self.lock:
+            gen = self._gen
+            vid = self.video
+            video_path = self.video_path
+            params = self._params()
+            events = list(self.events)
+        if vid is None:
+            return
         thumb_dir = bolt.thumbs_dir(video_path, params)
 
         def prog(done, total):
@@ -282,7 +286,8 @@ def create_app(video_path=None) -> FastAPI:
             state.load(body.path)
             m = state.video.meta
         except Exception:
-            state._reset_empty()
+            with state.lock:
+                state._reset_empty()
             raise HTTPException(400, "not a valid video file")
         return {"ok": True, "name": Path(body.path).name,
                 "width": m.width, "height": m.height, "fps": m.fps,

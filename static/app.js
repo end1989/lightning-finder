@@ -43,7 +43,9 @@ async function initMeta() {
   state.frameCount = state.meta.frame_count || 0;
   $("res-label").textContent =
     `${state.meta.width}×${state.meta.height} · ${state.fps.toFixed(2)} fps · ${state.frameCount} frames`;
-  video.src = "/video";
+  state.videoToken = (state.videoToken || 0) + 1;
+  video.src = `/video?v=${state.videoToken}`;
+  video.load();
 }
 
 function wireSkeleton() {
@@ -85,9 +87,11 @@ function entryRow(icon, label, onClick, isVideo) {
 async function browseTo(path) {
   let r;
   try {
-    r = await (await fetch(`/api/browse?path=${encodeURIComponent(path)}`)).json();
+    const resp = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+    r = await resp.json();
+    if (!resp.ok || !Array.isArray(r.dirs)) throw new Error(r.detail || "unreadable");
   } catch (e) {
-    $("open-list").innerHTML = '';
+    $("open-list").innerHTML = "";
     $("open-list").appendChild(entryRow("", "Couldn't read that folder.", () => {}, false));
     return;
   }
@@ -243,7 +247,7 @@ function showFrame(f) {
   f = Math.max(0, Math.min((state.frameCount || 1) - 1, f));
   state.curFrame = f;
   // Fast JPEG preview for display; Grab still pulls the lossless full-res PNG.
-  frameImg.src = `/api/frame/${f}.jpg`;
+  frameImg.src = `/api/frame/${f}.jpg?v=${state.videoToken || 0}`;
   updateTimeLabel(f);
   setPlayhead(state.duration ? (f / state.fps) / state.duration : 0);
   highlightActive(f);
@@ -326,7 +330,10 @@ async function startBestShots() {
     if (r.status === "done") { onBolts(r); return; }
     _boltPoll = setInterval(pollBolts, 1200);
   } catch (e) {
-    $("gallery-grid").innerHTML = `<div class="gal-msg">Error: ${e.message}</div>`;
+    const d = document.createElement("div");
+    d.className = "gal-msg";
+    d.textContent = `Error: ${e.message}`;
+    $("gallery-grid").replaceChildren(d);
   }
 }
 
@@ -364,7 +371,7 @@ function renderGallery() {
     card.className = "shot";
     const img = document.createElement("img");
     img.loading = "lazy";
-    img.src = `/api/bolt-thumb/${e.bolt_frame}.jpg`;
+    img.src = `/api/bolt-thumb/${e.bolt_frame}.jpg?v=${state.videoToken || 0}`;
     const cap = document.createElement("div");
     cap.className = "cap";
     const tc = document.createElement("span");

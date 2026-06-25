@@ -141,13 +141,15 @@ class AppState:
     def _run_bolt_refine(self):
         gen = self._gen
         events = list(self.events)
+        thumb_dir = bolt.thumbs_dir(self.video_path, self._params())
 
         def prog(done, total):
             if self._gen == gen:
                 self.bolt_progress = (done, total)
 
         try:
-            results = bolt.refine_events(self.video, events, progress=prog)
+            results = bolt.refine_events(self.video, events, progress=prog,
+                                         thumb_dir=thumb_dir)
             bolt.save_bolt(self.video_path, self._params(), results)
             with self.lock:
                 if self._gen != gen:        # a new video was opened; abandon stale results
@@ -307,6 +309,21 @@ def create_app(video_path=None) -> FastAPI:
     def refine_bolts_status():
         need_video()
         return _bolt_status_json(state)
+
+    @app.get("/api/bolt-thumb/{frame}.jpg")
+    def bolt_thumb(frame: int):
+        need_video()
+        p = bolt.thumb_path(state.video_path, state._params(), frame)
+        if os.path.exists(p):
+            return FileResponse(p, media_type="image/jpeg")
+        try:
+            data = bolt.make_thumbnail(state.video.frame(frame))
+        except IndexError:
+            raise HTTPException(404, "frame out of range")
+        os.makedirs(bolt.thumbs_dir(state.video_path, state._params()), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data)
+        return Response(content=data, media_type="image/jpeg")
 
     @app.get("/video")
     def video(request: Request):

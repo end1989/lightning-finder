@@ -153,3 +153,12 @@ def test_open_invalid_file_returns_400(tmp_path, monkeypatch):
     c = TestClient(create_app(None))
     assert c.post("/api/open", json={"path": str(bad)}).status_code == 400
     assert c.get("/api/state").json()["loaded"] is False
+
+
+def test_bolt_thumb_endpoint(clip):
+    r = client(clip).get("/api/bolt-thumb/50.jpg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+    import io
+    from PIL import Image
+    assert Image.open(io.BytesIO(r.content)).height <= 240

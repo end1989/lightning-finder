@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.lf_cache_*.json
+output/
+test_clip.mp4
+.pytest_cache/

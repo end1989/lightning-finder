@@ -217,14 +217,20 @@ function wireExport() {
 
   $("btn-rescan").addEventListener("click", async () => {
     const sensitivity = parseFloat($("sensitivity").value);
-    const r = await (await fetch("/api/scan", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sensitivity }),
-    })).json();
-    state.events = r.events;
-    renderTimeline();
-    renderList();
-    toast(`Found ${state.events.length} flashes`);
+    try {
+      const resp = await fetch("/api/scan", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sensitivity }),
+      });
+      if (!resp.ok) { toast(`Rescan failed: ${resp.status}`); return; }
+      const r = await resp.json();
+      state.events = r.events;
+      renderTimeline();
+      renderList();
+      toast(`Found ${state.events.length} flashes`);
+    } catch (err) {
+      toast(`Rescan error: ${err.message}`);
+    }
   });
 }
 
@@ -233,9 +239,24 @@ async function setStatus(peakFrame, status) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ peak_frame: peakFrame, status }),
   });
-  const e = state.events.find((x) => x.peak_frame === peakFrame);
-  if (e) e.status = status;
+  const ev = state.events.find((x) => x.peak_frame === peakFrame);
+  if (ev) ev.status = status;
   renderList();
+}
+
+function currentFlash() {
+  if (!state.events.length) return null;
+  // the flash whose span contains the cursor, else the nearest by peak frame
+  const containing = state.events.find(
+    (e) => e.start_frame <= state.curFrame && state.curFrame <= e.end_frame);
+  if (containing) return containing;
+  let best = state.events[0];
+  for (const e of state.events) {
+    if (Math.abs(e.peak_frame - state.curFrame) < Math.abs(best.peak_frame - state.curFrame)) {
+      best = e;
+    }
+  }
+  return best;
 }
 
 function wireKeyboard() {
@@ -248,8 +269,8 @@ function wireKeyboard() {
       case "g": case "G": grab(); break;
       case ",": stepTime(-0.1); break;
       case ".": stepTime(0.1); break;
-      case "x": case "X": if (state.events.length) setStatus(state.curFrame, "rejected"); break;
-      case "c": case "C": if (state.events.length) setStatus(state.curFrame, "confirmed"); break;
+      case "x": case "X": { const f = currentFlash(); if (f) setStatus(f.peak_frame, "rejected"); break; }
+      case "c": case "C": { const f = currentFlash(); if (f) setStatus(f.peak_frame, "confirmed"); break; }
     }
   });
 }

@@ -45,7 +45,11 @@ async function initMeta() {
     `${state.meta.width}×${state.meta.height} · ${state.fps.toFixed(2)} fps · ${state.frameCount} frames`;
   video.src = "/video";
   video.addEventListener("timeupdate", () => {
-    if (state.mode === "playback") updateTimeLabel(curFrameFromVideo());
+    if (state.mode === "playback") {
+      const f = curFrameFromVideo();
+      updateTimeLabel(f);
+      setPlayhead((state.duration ? video.currentTime / state.duration : 0));
+    }
   });
 }
 
@@ -72,3 +76,71 @@ async function main() {
   if (typeof wireExport === "function") wireExport();         // Task 8
 }
 main();
+
+// ---- Task 6: events, timeline markers, flash list, navigation ----------
+async function loadEvents() {
+  const r = await (await fetch("/api/events")).json();
+  state.events = r.events;
+  renderTimeline();
+  renderList();
+}
+
+function setPlayhead(frac) {
+  let ph = document.querySelector("#timeline .playhead");
+  if (!ph) {
+    ph = document.createElement("div");
+    ph.className = "playhead";
+    $("timeline").appendChild(ph);
+  }
+  ph.style.left = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+}
+
+function renderTimeline() {
+  const tl = $("timeline");
+  tl.querySelectorAll(".marker").forEach((m) => m.remove());
+  const dur = state.duration || (state.frameCount / state.fps) || 1;
+  for (const e of state.events) {
+    const m = document.createElement("div");
+    m.className = "marker";
+    m.style.left = `${(e.peak_time / dur) * 100}%`;
+    m.title = `frame ${e.peak_frame} · ${e.timecode}`;
+    m.addEventListener("click", (ev) => { ev.stopPropagation(); seekToFrame(e.peak_frame); });
+    tl.appendChild(m);
+  }
+}
+
+function renderList() {
+  const ol = $("flash-list");
+  ol.innerHTML = "";
+  state.events.forEach((e, i) => {
+    const li = document.createElement("li");
+    li.dataset.peak = e.peak_frame;
+    if (e.status === "rejected") li.classList.add("rejected");
+    const label = document.createElement("span");
+    label.textContent = `#${i + 1} · ${e.timecode}`;
+    const frameNum = document.createElement("span");
+    frameNum.className = "muted";
+    frameNum.textContent = `f${e.peak_frame}`;
+    li.appendChild(label);
+    li.appendChild(frameNum);
+    li.addEventListener("click", () => seekToFrame(e.peak_frame));
+    ol.appendChild(li);
+  });
+}
+
+function highlightActive(frame) {
+  document.querySelectorAll("#flash-list li").forEach((li) =>
+    li.classList.toggle("active", Number(li.dataset.peak) === frame));
+}
+
+function jumpToFlash(dir) {
+  if (!state.events.length) return;
+  const cur = state.curFrame;
+  const peaks = state.events.map((e) => e.peak_frame);
+  let target = null;
+  if (dir > 0) target = peaks.find((p) => p > cur);
+  else target = [...peaks].reverse().find((p) => p < cur);
+  if (target == null) target = dir > 0 ? peaks[0] : peaks[peaks.length - 1];
+  seekToFrame(target);
+  highlightActive(target);
+}

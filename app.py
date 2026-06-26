@@ -21,6 +21,7 @@ import detector
 from video import VideoFile
 
 STATIC_DIR = Path(__file__).parent / "static"
+DEFAULT_VIDEOS_DIR = Path(__file__).parent / "videos"
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v",
               ".mpg", ".mpeg", ".wmv"}
@@ -252,11 +253,14 @@ def create_app(video_path=None) -> FastAPI:
     @app.get("/api/browse")
     def browse(path: str = ""):
         if not path:
-            if os.name == "nt":
+            if DEFAULT_VIDEOS_DIR.is_dir():
+                path = str(DEFAULT_VIDEOS_DIR)
+            elif os.name == "nt":
                 drives = [f"{d}:\\" for d in string.ascii_uppercase
                           if os.path.exists(f"{d}:\\")]
                 return {"path": "", "parent": None, "dirs": drives, "videos": []}
-            path = os.path.expanduser("~")
+            else:
+                path = os.path.expanduser("~")
         path = os.path.abspath(path)
         if not os.path.isdir(path):
             raise HTTPException(400, "not a directory")
